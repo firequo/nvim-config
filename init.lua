@@ -1,4 +1,5 @@
 require("asa")
+vim.g.mapleader = " "
 
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
@@ -187,6 +188,7 @@ local on_attach = function(_, bufnr)
     nmap('<leader>wt', require('telescope.builtin').lsp_type_definitions, 'Type [D]efinition')
     nmap('<leader>ds', require('telescope.builtin').lsp_document_symbols, '[D]ocument [S]ymbols')
     nmap('<leader>ws', require('telescope.builtin').lsp_dynamic_workspace_symbols, '[W]orkspace [S]ymbols')
+    print("reeeeeee")
 
     -- See `:help K` for why this keymap
     nmap('<leader>i', vim.lsp.buf.hover, 'Hover Documentation')
@@ -239,7 +241,6 @@ local servers = {
 
 -- Setup neovim lua configuration
 require('neodev').setup()
-require('lspconfig').zls.setup{}
 
 
 -- nvim-cmp supports additional completion capabilities, so broadcast that to servers
@@ -264,6 +265,9 @@ mason_lspconfig.setup_handlers {
     end,
 }
 
+require('lspconfig').zls.setup{
+    on_attach = on_attach,
+}
 -- [[ Configure nvim-cmp ]]
 -- See `:help cmp`
 local cmp = require 'cmp'
