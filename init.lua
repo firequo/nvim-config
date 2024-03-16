@@ -225,7 +225,7 @@ local servers = {
     -- pyright = {},
     -- rust_analyzer = {},
     -- tsserver = {},
-    html = { filetypes = { 'html', 'twig', 'hbs'} },
+    -- html = { filetypes = { 'html', 'twig', 'hbs'} },
 
     lua_ls = {
         Lua = {
@@ -239,6 +239,7 @@ local servers = {
 
 -- Setup neovim lua configuration
 require('neodev').setup()
+require('lspconfig').zls.setup{}
 
 
 -- nvim-cmp supports additional completion capabilities, so broadcast that to servers
