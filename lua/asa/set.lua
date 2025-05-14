@@ -13,6 +13,8 @@ vim.opt.smartindent = true
 vim.opt.linebreak = true
 
 vim.opt.swapfile = false
+vim.opt.udf = true;
+
 vim.opt.backup = false
 
 vim.opt.hlsearch = false
