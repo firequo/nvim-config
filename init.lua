@@ -497,9 +497,8 @@ capabilities = require('cmp_nvim_lsp').default_capabilities(capabilities)
 
 -- Ensure the servers above are installed
 --
-require('lspconfig').zls.setup{
-    on_attach = on_attach,
-}
+vim.lsp.enable('zls')
+vim.lsp.config('zls', {on_attach = on_attach})
 -- [[ Configure nvim-cmp ]]
 -- See `:help cmp`
 local cmp = require 'cmp'

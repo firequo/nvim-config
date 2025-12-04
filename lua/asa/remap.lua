@@ -28,7 +28,8 @@ vim.keymap.set('v', 'k', 'e')
 vim.keymap.set('v', 'l', 'u')
 vim.keymap.set('v', 'i', 'l')
 vim.keymap.set('v', 'u', 'i')
-vim.keymap.set('n', '<leader>e', ':lua vim.lsp.buf.hover()');
+
+--  vim.keymap.set('n', '<leader>e', ':lua vim.lsp.buf.hover()');
 
 vim.keymap.set('n', '<leader>pp', '"+p')
 vim.keymap.set('v', '<leader>yy', '"+y')
