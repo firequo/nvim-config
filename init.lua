@@ -1,5 +1,157 @@
 require("asa")
+
 vim.g.mapleader = " "
+vim.opt.foldmethod = "expr"
+vim.opt.foldexpr = "nvim_treesitter#foldexpr()"
+vim.opt.foldtext = ""
+
+-- function JavaFoldText()
+--     local fold_start = vim.v.foldstart
+--     local fold_end = vim.v.foldend
+--     local line = vim.api.nvim_buf_get_lines(0, fold_start - 1, fold_start, false)[1]
+--     if line:match("^%s*@") then
+--         line = vim.api.nvim_buf_get_lines(0, fold_start, fold_start + 1, false)[1]
+--     end
+--     local lines_count = fold_end - fold_start + 1
+--     return line .. "  ... (" .. lines_count .. " lines)"
+-- end
+
+_G.JavaFoldText = function()
+  local fs = vim.v.foldstart
+  local fe = vim.v.foldend
+  local buf = vim.api.nvim_get_current_buf()
+
+  -- Safely pull the initial line string
+  local first_line_table = vim.api.nvim_buf_get_lines(buf, fs - 1, fs, false)
+  local first_line = first_line_table[1] or ""
+  local target_line_idx = fs - 1 -- Convert to 0-index for buffer API calls
+
+  -- If the first line is an annotation, scan forward for the signature row
+  if first_line:match("^%s*@") then
+    for i = fs, fe - 1 do
+      local next_line_table = vim.api.nvim_buf_get_lines(buf, i, i + 1, false)
+      local next_line = next_line_table[1] or ""
+      
+      -- Match visibility modifiers or method declaration identifiers
+      if next_line:match("public") or next_line:match("private") or next_line:match("protected") or next_line:match("%(") then
+        target_line_idx = i
+        break
+      end
+    end
+  end
+
+  -- Get the chosen string line text
+  local target_line_table = vim.api.nvim_buf_get_lines(buf, target_line_idx, target_line_idx + 1, false)
+  local line_text = target_line_table[1] or ""
+
+  -- Initialize an empty container for our highlight tuples
+  local result = {}
+  
+  -- Use Neovim's core parser to extract tokens from the chosen signature line
+  local highlighter = vim.treesitter.highlighter.active[buf]
+  if highlighter then
+    local line_len = #line_text
+    local col = 0
+    while col < line_len do
+      local ok, captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, col)
+      local hl_group = "Folded"
+      
+      -- If captures are found, translate the highest priority capture to an @ keyword group
+      if ok and captures and #captures > 0 then
+        hl_group = "@" .. captures[#captures].capture
+      end
+      
+      -- Consume matching continuous token blocks to keep execution lightweight
+      local next_col = col + 1
+      while next_col < line_len do
+        local ok_next, next_captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, next_col)
+        local next_hl = (ok_next and next_captures and #next_captures > 0) and ("@" .. next_captures[#next_captures].capture) or "Folded"
+        if next_hl ~= hl_group then break end
+        next_col = next_col + 1
+      end
+      
+      -- Format and insert the parsed visual chunk
+      local chunk_text = string.sub(line_text, col + 1, next_col)
+      table.insert(result, { chunk_text, hl_group })
+      col = next_col
+    end
+  else
+    -- Fallback safety measure if Tree-sitter isn't ready on buffer init
+    table.insert(result, { line_text, "Folded" })
+  end
+
+  -- Append a clean line count block using the Comment highlight group
+  local lines_count = fe - fs + 1
+  table.insert(result, { "    (" .. lines_count .. " lines) ", "Comment" })
+  
+  return result
+end
+
+vim.api.nvim_create_autocmd({ "BufReadPost", "BufWinEnter" }, {
+  pattern = "*.java",
+  callback = function(args)
+    local buf = args.buf
+
+    -- Assign fold options
+    vim.opt_local.foldmethod = "expr"
+    vim.opt_local.foldexpr = "v:lua.vim.treesitter.foldexpr()"
+    vim.opt_local.foldtext = "v:lua.JavaFoldText()"
+
+    -- Force Tree-sitter to parse synchronously immediately
+    local ok, parser = pcall(vim.treesitter.get_parser, buf)
+    if ok and parser then
+      parser:parse(true)
+    end
+
+    -- Defer recalculation to give the window engine time to settle
+    vim.defer_fn(function()
+      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
+        vim.cmd("silent! normal! zx")
+      end
+    end, 80)
+  end,
+})
+
+vim.api.nvim_create_autocmd({ "BufReadPost", "BufWinEnter" }, {
+  pattern = "*.zig",
+  callback = function(args)
+    local buf = args.buf
+
+    -- Force Tree-sitter to parse synchronously immediately
+    local ok, parser = pcall(vim.treesitter.get_parser, buf)
+    if ok and parser then
+      parser:parse(true)
+    end
+
+    -- Defer recalculation to give the window engine time to settle
+    vim.defer_fn(function()
+      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
+        vim.cmd("silent! normal! zx")
+      end
+    end, 80)
+  end,
+})
+
+-- vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
+--   pattern = "java",
+--   callback = function()
+--     -- Small defer prevents LazyVim's default setup scripts from resetting it
+--     vim.schedule(function()
+--       vim.opt_local.foldtext = "v:lua.JavaFoldText()"
+--       vim.opt_local.foldnestmax = 2
+--     end)
+--   end,
+-- })
+-- vim.api.nvim_create_autocmd({'BufWinLeave'}, {
+--   pattern = {"*.*"},
+--   desc = "save view (folds), when closing file",
+--   command = "mkview",
+-- })
+-- vim.api.nvim_create_autocmd({"BufWinEnter"}, {
+--   pattern = {"*.*"},
+--   desc = "load view (folds), when opening file",
+--   command = "silent! loadview"
+-- })
 
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
@@ -15,6 +167,9 @@ end
 vim.opt.rtp:prepend(lazypath)
 require("lazy").setup(
 {
+{ 'nvim-mini/mini.files', version = false },
+{ 'nvim-mini/mini.pick', version = false },
+{"shortcuts/no-neck-pain.nvim", version = "*"},
 {
     "bluz71/vim-moonfly-colors",
     name = "moonfly",
@@ -408,6 +563,259 @@ vim.defer_fn(function()
         },
     }
 end, 0)
+
+local nmap_leader = function(suffix, rhs, desc)
+  vim.keymap.set('n', '<Leader>' .. suffix, rhs, { desc = desc })
+end
+
+require('mini.files').setup(
+    {
+        mappings = {
+            go_in_plus = '<CR>',
+            go_out = '-',
+        }
+    }
+)
+require('mini.pick').setup()
+vim.api.nvim_set_hl(0, 'MiniPickMatchCurrent', { bg = '#ffffff', fg = '#000000', bold = true })
+vim.o.ignorecase = true
+require("no-neck-pain").setup({
+    autocmds = {
+        enableOnVimEnter = true,
+    },
+    buffers = {
+        scratchPad = {
+            -- set to `false` to
+            -- disable auto-saving
+            enabled = true,
+            -- set to `nil` to default 
+            -- to current working directory
+            location = nil;
+        },
+        bo = {
+            filetype = "md"
+        },
+        right = {
+            enabled = false,
+        },
+    },
+})
+
+
+local explore_at_file = '<Cmd>lua MiniFiles.open(vim.api.nvim_buf_get_name(0))<CR>'
+local explore_quickfix = function()
+  vim.cmd(vim.fn.getqflist({ winid = true }).winid ~= 0 and 'cclose' or 'copen')
+end
+
+local function live_filename_grep()
+  local last_query = nil
+
+  MiniPick.start({
+    source = {
+      name = 'Ripgrep (Filenames Only)',
+      items = {},
+      match = function(items, indices, query)
+        local pattern = table.concat(query)
+
+        -- If query hasn't changed, set_picker_items() triggered this match.
+        -- Return indices to display ripgrep's matches.
+        if pattern == last_query then
+          return indices
+        end
+        last_query = pattern
+
+        if pattern == '' then
+          MiniPick.set_picker_items({})
+          return {}
+        end
+
+        MiniPick.set_picker_items_from_cli({
+          'rg',
+          '-l',
+          '-i',
+          pattern,
+        }, {
+          set_opts = { querytick = MiniPick.get_querytick() },
+        })
+
+        return {}
+      end,
+      show = function(buf_id, items, query)
+        MiniPick.default_show(buf_id, items, query, { show_icons = true })
+      end,
+    },
+  })
+end
+
+nmap_leader('ff', explore_at_file,                              'File directory')
+nmap_leader('fl', explore_quickfix,                             'Quickfix list')
+nmap_leader('lf', '<Cmd>Pick files<CR>',                        'Files');
+nmap_leader('lg', '<Cmd>Pick grep_live<CR>',                    'Grep live')
+nmap_leader('lb', live_filename_grep,                               'Grep filenames')
+
+
+-- 1. Persistent queue to hold selected file paths
+local file_queue = {}
+local done_file_queue = {}
+
+-- 2. Helper function to capture marked or highlighted items from an active picker
+local function add_to_queue()
+  local matches = MiniPick.get_picker_matches()
+  if not matches then return end
+
+  -- Priority: process all marked items first; if none are marked, process the current item
+  local items_to_add = {}
+  if matches.marked and #matches.marked > 0 then
+    items_to_add = matches.marked
+  elseif matches.current then
+    items_to_add = { matches.current }
+  end
+
+  if #items_to_add == 0 then return end
+
+  -- Append to queue while preventing duplicate paths
+  local added_count = 0
+  for _, item in ipairs(items_to_add) do
+    if not vim.tbl_contains(file_queue, item) then
+      table.insert(file_queue, item)
+      added_count = added_count + 1
+    end
+  end
+
+  vim.notify(string.format("Queued %d file(s). Total in queue: %d", added_count, #file_queue))
+end
+
+-- 3. Secondary picker for the queue
+local function open_queue_picker()
+  if #file_queue == 0 then
+    vim.notify("File queue is empty!", vim.log.levels.WARN)
+    return
+  end
+
+  MiniPick.start({
+    source = {
+      name = string.format('Queued Files (%d)', #file_queue),
+      items = file_queue,
+      show = function(buf_id, items, query)
+        MiniPick.default_show(buf_id, items, query, { show_icons = true })
+      end,
+      -- Custom choose handler for single selection (<CR>)
+      choose = function(item)
+        if not item then return end
+
+        for i, queued_path in ipairs(file_queue) do
+          if queued_path == item then
+            table.remove(file_queue, i)
+              if not vim.tbl_contains(done_file_queue, queued_path) then
+                table.insert(done_file_queue, queued_path)
+              end
+            break
+          end
+        end
+
+        MiniPick.default_choose(item)
+      end,
+      -- Custom choose handler for marked items (<M-a>)
+      choose_marked = function(items)
+        if not items then return end
+
+        for _, item in ipairs(items) do
+          for i, queued_path in ipairs(file_queue) do
+            if queued_path == item then
+              table.remove(file_queue, i)
+              if not vim.tbl_contains(done_file_queue, queued_path) then
+                table.insert(done_file_queue, queued_path)
+              end
+              break
+            end
+          end
+        end
+
+        MiniPick.default_choose_marked(items)
+      end,
+    },
+  })
+end
+local open_done_picker = function ()
+  if #done_file_queue == 0 then
+    vim.notify("Done file queue is empty!", vim.log.levels.WARN)
+    return
+  end
+
+  MiniPick.start({
+    source = {
+      name = string.format('Used Queued Files (%d)', #done_file_queue),
+      items = done_file_queue,
+    }})
+end
+
+local clear_done_list = function ()
+    done_file_queue = {}
+end
+-- 4. Register custom keymap inside mini.pick
+MiniPick.setup({
+  mappings = {
+    -- Press <C-s> while inside ANY mini.pick window to queue items
+    add_to_queue = {
+      char = '<C-s>',
+      func = add_to_queue,
+    },
+    clear_done_list = {
+      char = '<C-z>',
+      func = clear_done_list,
+    },
+  },
+})
+
+-- 5. Hotkey to open the queue picker
+vim.keymap.set('n', '<leader>lq', open_queue_picker, { desc = 'Open queued files picker' })
+vim.keymap.set('n', '<leader>ld', open_done_picker, { desc = 'Open done files picker' })
+
+
+
+nmap_leader('ic', '<Cmd>NoNeckPain<CR>',                        'no neck pain lhs');
+
+nmap_leader('be', '<Cmd>bn<CR>',                                'next buf');
+nmap_leader('bn', '<Cmd>bp<CR>',                                'prev buf');
+
+nmap_leader('si', 'gg?import <CR><Down>',                             'skip imports');
+local widths = { 60, 20, 10 }
+
+local ensure_center_layout = function(ev)
+    local state = MiniFiles.get_explorer_state()
+    if state == nil then return end
+
+    -- Compute "depth offset" - how many windows are between this and focused
+    local path_this = vim.api.nvim_buf_get_name(ev.data.buf_id):match('^minifiles://%d+/(.*)$')
+    local depth_this
+    for i, path in ipairs(state.branch) do
+        if path == path_this then depth_this = i end
+    end
+    if depth_this == nil then return end
+    local depth_offset = depth_this - state.depth_focus
+
+    -- Adjust config of this event's window
+    local i = math.abs(depth_offset) + 1
+    local win_config = vim.api.nvim_win_get_config(ev.data.win_id)
+    win_config.width = i <= #widths and widths[i] or widths[#widths]
+
+    win_config.col = math.floor(0.5 * (vim.o.columns - widths[1]))
+    for j = 1, math.abs(depth_offset) do
+        local sign = depth_offset == 0 and 0 or (depth_offset > 0 and 1 or -1)
+        -- widths[j+1] for the negative case because we don't want to add the center window's width 
+        local prev_win_width = (sign == -1 and widths[j+1]) or widths[j] or widths[#widths]
+        -- Add an extra +2 each step to account for the border width
+        win_config.col = win_config.col + sign * (prev_win_width + 2)
+    end
+
+    win_config.height = depth_offset == 0 and 25 or 20
+    win_config.row = math.floor(0.5 * (vim.o.lines - win_config.height))
+    win_config.border = { "🭽", "▔", "🭾", "▕", "🭿", "▁", "🭼", "▏" }
+    vim.api.nvim_win_set_config(ev.data.win_id, win_config)
+end
+
+vim.api.nvim_create_autocmd("User", { pattern = 'MiniFilesWindowUpdate', callback = ensure_center_layout })
+
 
 -- [[ Configure LSP ]]
 --  This function gets run when an LSP connects to a particular buffer.

@@ -1,6 +1,7 @@
 vim.g.mapleader = " "
-vim.keymap.set('n', '<leader>ff', vim.cmd.Ex)
 vim.keymap.set('n', '<leader>ya', 'mjggVG"+y\'j')
+vim.keymap.set('n', '<leader>f{', ':ij class<cr>')
+vim.keymap.set('n', '<leader>se', ':Telescope diagnostics<cr>')
 
 
 vim.keymap.set('n', 'm', 'h')
