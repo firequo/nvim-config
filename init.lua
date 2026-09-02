@@ -5,153 +5,222 @@ vim.opt.foldmethod = "expr"
 vim.opt.foldexpr = "nvim_treesitter#foldexpr()"
 vim.opt.foldtext = ""
 
--- function JavaFoldText()
---     local fold_start = vim.v.foldstart
---     local fold_end = vim.v.foldend
---     local line = vim.api.nvim_buf_get_lines(0, fold_start - 1, fold_start, false)[1]
---     if line:match("^%s*@") then
---         line = vim.api.nvim_buf_get_lines(0, fold_start, fold_start + 1, false)[1]
---     end
---     local lines_count = fold_end - fold_start + 1
---     return line .. "  ... (" .. lines_count .. " lines)"
--- end
+vim.opt.title = true
+local get_path_start = function()
+    local fullpath = vim.fn.getcwd()
+    local i, j
+    local k = 0
+    repeat
+        i = j
+        j, k = string.find(fullpath, "/", k + 1, true)
+    until j == nil
 
-_G.JavaFoldText = function()
-  local fs = vim.v.foldstart
-  local fe = vim.v.foldend
-  local buf = vim.api.nvim_get_current_buf()
-
-  -- Safely pull the initial line string
-  local first_line_table = vim.api.nvim_buf_get_lines(buf, fs - 1, fs, false)
-  local first_line = first_line_table[1] or ""
-  local target_line_idx = fs - 1 -- Convert to 0-index for buffer API calls
-
-  -- If the first line is an annotation, scan forward for the signature row
-  if first_line:match("^%s*@") then
-    for i = fs, fe - 1 do
-      local next_line_table = vim.api.nvim_buf_get_lines(buf, i, i + 1, false)
-      local next_line = next_line_table[1] or ""
-      
-      -- Match visibility modifiers or method declaration identifiers
-      if next_line:match("public") or next_line:match("private") or next_line:match("protected") or next_line:match("%(") then
-        target_line_idx = i
-        break
-      end
-    end
-  end
-
-  -- Get the chosen string line text
-  local target_line_table = vim.api.nvim_buf_get_lines(buf, target_line_idx, target_line_idx + 1, false)
-  local line_text = target_line_table[1] or ""
-
-  -- Initialize an empty container for our highlight tuples
-  local result = {}
-  
-  -- Use Neovim's core parser to extract tokens from the chosen signature line
-  local highlighter = vim.treesitter.highlighter.active[buf]
-  if highlighter then
-    local line_len = #line_text
-    local col = 0
-    while col < line_len do
-      local ok, captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, col)
-      local hl_group = "Folded"
-      
-      -- If captures are found, translate the highest priority capture to an @ keyword group
-      if ok and captures and #captures > 0 then
-        hl_group = "@" .. captures[#captures].capture
-      end
-      
-      -- Consume matching continuous token blocks to keep execution lightweight
-      local next_col = col + 1
-      while next_col < line_len do
-        local ok_next, next_captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, next_col)
-        local next_hl = (ok_next and next_captures and #next_captures > 0) and ("@" .. next_captures[#next_captures].capture) or "Folded"
-        if next_hl ~= hl_group then break end
-        next_col = next_col + 1
-      end
-      
-      -- Format and insert the parsed visual chunk
-      local chunk_text = string.sub(line_text, col + 1, next_col)
-      table.insert(result, { chunk_text, hl_group })
-      col = next_col
-    end
-  else
-    -- Fallback safety measure if Tree-sitter isn't ready on buffer init
-    table.insert(result, { line_text, "Folded" })
-  end
-
-  -- Append a clean line count block using the Comment highlight group
-  local lines_count = fe - fs + 1
-  table.insert(result, { "    (" .. lines_count .. " lines) ", "Comment" })
-  
-  return result
+    return string.sub(fullpath, i + 1)
 end
 
-vim.api.nvim_create_autocmd({ "BufReadPost", "BufWinEnter" }, {
-  pattern = "*.java",
-  callback = function(args)
-    local buf = args.buf
+vim.opt.titlestring = get_path_start()
 
-    -- Assign fold options
-    vim.opt_local.foldmethod = "expr"
-    vim.opt_local.foldexpr = "v:lua.vim.treesitter.foldexpr()"
-    vim.opt_local.foldtext = "v:lua.JavaFoldText()"
+_G.FoldText = function()
+    local fs = vim.v.foldstart
+    local fe = vim.v.foldend
+    local buf = vim.api.nvim_get_current_buf()
+    local lines = vim.api.nvim_buf_get_lines(buf, fs - 1, fe, false)
+    local display_line = lines[0]
+    local line_count = fe - fs + 1
 
-    -- Force Tree-sitter to parse synchronously immediately
-    local ok, parser = pcall(vim.treesitter.get_parser, buf)
-    if ok and parser then
-      parser:parse(true)
+    local result = {}
+    for i = 1, line_count  do
+        if lines[i]:match("^%s*@") then
+            fs = fs + 1
+        else
+            display_line = lines[i]
+            break;
+        end
     end
 
-    -- Defer recalculation to give the window engine time to settle
-    vim.defer_fn(function()
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
-        vim.cmd("silent! normal! zx")
-      end
-    end, 80)
-  end,
-})
+    local display_line_index = fs - 1
 
-vim.api.nvim_create_autocmd({ "BufReadPost", "BufWinEnter" }, {
-  pattern = "*.zig",
-  callback = function(args)
-    local buf = args.buf
-
-    -- Force Tree-sitter to parse synchronously immediately
-    local ok, parser = pcall(vim.treesitter.get_parser, buf)
-    if ok and parser then
-      parser:parse(true)
+    local highlighter = vim.treesitter.highlighter.active[buf]
+    if highlighter then
+        local line_len = #display_line
+        local col = 0
+        while col < line_len do
+            local ok, captures = pcall(vim.treesitter.get_captures_at_pos, buf, display_line_index, col)
+            local hl_group = "Folded"
+            -- If captures are found, translate the highest priority capture to an @ keyword group
+            if ok and captures and #captures > 0 then
+                hl_group = "@" .. captures[#captures].capture
+            end
+            -- Consume matching continuous token blocks to keep execution lightweight
+            local next_col = col + 1
+            while next_col < line_len do
+                local ok_next, next_captures = pcall(vim.treesitter.get_captures_at_pos, buf, display_line_index, next_col)
+                local next_hl = (ok_next and next_captures and #next_captures > 0) and ("@" .. next_captures[#next_captures].capture) or "Folded"
+                if next_hl ~= hl_group then break end
+                next_col = next_col + 1
+            end
+            -- Format and insert the parsed visual chunk
+            local chunk_text = string.sub(display_line, col + 1, next_col)
+            table.insert(result, { chunk_text, hl_group })
+            col = next_col
+        end
+    else
+        -- Fallback safety measure if Tree-sitter isn't ready on buffer init
+        table.insert(result, { display_line, "Folded" })
     end
+    -- Append a clean line count block using the Comment highlight group
+    local lines_count = fe - fs + 1
+    table.insert(result, { "     (" .. lines_count .. " lines) ", "Folded" })
+    return result
+end
 
-    -- Defer recalculation to give the window engine time to settle
-    vim.defer_fn(function()
-      if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
-        vim.cmd("silent! normal! zx")
-      end
-    end, 80)
-  end,
+ _G.JavaFoldText = function()
+   local fs = vim.v.foldstart
+   local fe = vim.v.foldend
+   local buf = vim.api.nvim_get_current_buf()
+ 
+   -- Safely pull the initial line string
+   local first_line_table = vim.api.nvim_buf_get_lines(buf, fs - 1, fs, false)
+   local first_line = first_line_table[1] or ""
+   local target_line_idx = fs - 1 -- Convert to 0-index for buffer API calls
+   local target_line = ""
+ 
+   -- If the first line is an annotation, scan forward for the signature row
+   if first_line:match("^%s*@") then
+     for i = fs, fe - 1 do
+       local next_line_table = vim.api.nvim_buf_get_lines(buf, i, i + 1, false)
+       local next_line = next_line_table[1] or ""
+       
+       -- Match visibility modifiers or method declaration identifiers
+       if next_line:match("public") or next_line:match("private") or next_line:match("protected") or next_line:match("%(") then
+         target_line_idx = i
+         target_line = next_line;
+         break
+       end
+     end
+    else
+       target_line = first_line
+   end
+ 
+   local result = {}
+   -- Get the chosen string line text
+    if target_line_idx ~= fs - 1 then
+        local target_line_table = vim.api.nvim_buf_get_lines(buf, fs - 1, target_line_idx, false)
+        local annotation_text = ""
+        for _, value in ipairs(target_line_table) do 
+            annotation_text = annotation_text .. value .. " "
+        end
+        table.insert(result, {annotation_text, "@attribute"})
+    end
+   
+   local highlighter = vim.treesitter.highlighter.active[buf]
+   if highlighter then
+     local line_len = #target_line
+     local col = 0
+     while col < line_len do
+       local ok, captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, col)
+       local hl_group = "Folded"
+       -- If captures are found, translate the highest priority capture to an @ keyword group
+       if ok and captures and #captures > 0 then
+         hl_group = "@" .. captures[#captures].capture
+       end
+       -- Consume matching continuous token blocks to keep execution lightweight
+       local next_col = col + 1
+       while next_col < line_len do
+         local ok_next, next_captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, next_col)
+         local next_hl = (ok_next and next_captures and #next_captures > 0) and ("@" .. next_captures[#next_captures].capture) or "Folded"
+         if next_hl ~= hl_group then break end
+         next_col = next_col + 1
+       end
+       -- Format and insert the parsed visual chunk
+       local chunk_text = string.sub(target_line, col + 1, next_col)
+       table.insert(result, { chunk_text, hl_group })
+       col = next_col
+     end
+   else
+     -- Fallback safety measure if Tree-sitter isn't ready on buffer init
+     table.insert(result, { target_line, "Comment" })
+    end
+ 
+   -- Append a clean line count block using the Comment highlight group
+   local lines_count = fe - fs + 1
+   table.insert(result, { "    (" .. lines_count .. " lines) ", "Folded" })
+   
+   return result
+ end
+
+_G.DefaultFoldText = function()
+   local fs = vim.v.foldstart
+   local fe = vim.v.foldend
+   local buf = vim.api.nvim_get_current_buf()
+ 
+   local first_line_table = vim.api.nvim_buf_get_lines(buf, fs - 1, fs, false)
+   local first_line = first_line_table[1] or ""
+ 
+   local result = {}
+   
+   local highlighter = vim.treesitter.highlighter.active[buf]
+   local target_line = first_line
+   local target_line_idx = fs - 1
+
+   if highlighter then
+     local line_len = #target_line
+     local col = 0
+     while col < line_len do
+       local ok, captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, col)
+       local hl_group = "Folded"
+       
+       -- If captures are found, translate the highest priority capture to an @ keyword group
+       if ok and captures and #captures > 0 then
+         hl_group = "@" .. captures[#captures].capture
+       end
+       
+       -- Consume matching continuous token blocks to keep execution lightweight
+       local next_col = col + 1
+       while next_col < line_len do
+         local ok_next, next_captures = pcall(vim.treesitter.get_captures_at_pos, buf, target_line_idx, next_col)
+         local next_hl = (ok_next and next_captures and #next_captures > 0) and ("@" .. next_captures[#next_captures].capture) or "Folded"
+         if next_hl ~= hl_group then break end
+         next_col = next_col + 1
+       end
+       
+       -- Format and insert the parsed visual chunk
+       local chunk_text = string.sub(target_line, col + 1, next_col)
+       table.insert(result, { chunk_text, hl_group })
+       col = next_col
+     end
+   else
+     -- Fallback safety measure if Tree-sitter isn't ready on buffer init
+     table.insert(result, { target_line, "Comment" })
+end
+ 
+   local lines_count = fe - fs + 1
+   table.insert(result, { "    (" .. lines_count .. " lines) ", "Folded" })
+   
+   return result
+end
+ 
+vim.api.nvim_create_autocmd({ "BufReadPost", "BufWinEnter" }, {
+    callback = function(args)
+
+        local buf = args.buf
+
+        -- Force Tree-sitter to parse synchronously immediately
+        local ok, parser = pcall(vim.treesitter.get_parser, buf)
+        if ok and parser then
+            parser:parse(true)
+        end
+        if ok then
+            vim.opt_local.foldtext = "v:lua.FoldText()"
+        end
+        -- Defer recalculation to give the window engine time to settle
+        vim.defer_fn(function()
+            if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_current_buf() == buf then
+                vim.cmd("silent! normal! zx")
+            end
+        end, 80)
+    end,
 })
-
--- vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter" }, {
---   pattern = "java",
---   callback = function()
---     -- Small defer prevents LazyVim's default setup scripts from resetting it
---     vim.schedule(function()
---       vim.opt_local.foldtext = "v:lua.JavaFoldText()"
---       vim.opt_local.foldnestmax = 2
---     end)
---   end,
--- })
--- vim.api.nvim_create_autocmd({'BufWinLeave'}, {
---   pattern = {"*.*"},
---   desc = "save view (folds), when closing file",
---   command = "mkview",
--- })
--- vim.api.nvim_create_autocmd({"BufWinEnter"}, {
---   pattern = {"*.*"},
---   desc = "load view (folds), when opening file",
---   command = "silent! loadview"
--- })
 
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
@@ -170,6 +239,13 @@ require("lazy").setup(
 { 'nvim-mini/mini.files', version = false },
 { 'nvim-mini/mini.pick', version = false },
 {"shortcuts/no-neck-pain.nvim", version = "*"},
+{
+    'MeanderingProgrammer/render-markdown.nvim',
+    dependencies = { 'nvim-treesitter/nvim-treesitter', 'nvim-mini/mini.icons' },
+    ---@module 'render-markdown'
+    ---@type render.md.UserConfig
+    opts = {},
+},
 {
     "bluz71/vim-moonfly-colors",
     name = "moonfly",
@@ -564,6 +640,16 @@ vim.defer_fn(function()
     }
 end, 0)
 
+vim.api.nvim_set_hl(0, "Normal", { bg = "#00001f" })
+vim.api.nvim_set_hl(0, "LineNr", { fg = "#696969", bg = "#00001f" })
+vim.api.nvim_set_hl(0, "SignColumn", { bg = "#00001f" })
+vim.api.nvim_set_hl(0, "folded", { bg = "#00001f" })
+vim.api.nvim_set_hl(0, "WinSeparator", { fg = "#ffffff", bg = "#000000" })
+vim.api.nvim_set_hl(0, "StatusLine", { fg = "#ffffff", bg = "#000000" })
+vim.api.nvim_set_hl(0, "StatusLineNC", { fg = "#ffffff", bg = "#000000" })
+
+vim.opt.fillchars = { fold = ' ' }
+
 local nmap_leader = function(suffix, rhs, desc)
   vim.keymap.set('n', '<Leader>' .. suffix, rhs, { desc = desc })
 end
@@ -646,6 +732,7 @@ local function live_filename_grep()
     },
   })
 end
+nmap_leader('yp', '<Cmd>let @+ = expand("%")<CR>', 'yank path')
 
 nmap_leader('ff', explore_at_file,                              'File directory')
 nmap_leader('fl', explore_quickfix,                             'Quickfix list')
